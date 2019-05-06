@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync"
 	"whoim/common"
 )
 
@@ -23,6 +24,8 @@ type ChatServer struct {
 
 	curClientID int
 	curGroupID  int
+
+	sync.RWMutex
 }
 
 func NewChatServer(port int) (*ChatServer, error) {
@@ -89,6 +92,11 @@ func (srv *ChatServer) HandleClientConn(ch ClientConn) {
 		size, err := ch.Conn.Read(buf)
 		if size == 0 {
 			log.Printf("client conn:{%v:%v} closed", ch.ClientID, ch.ClientAddr)
+			//如果在一些群组里，需要从群组里删除该对象
+			for _, group := range srv.GroupMap {
+				srv.LeaveGroup(group.GroupID, ch)
+			}
+			ch.Conn.Close()
 			break
 		}
 		if err != nil {
@@ -111,7 +119,7 @@ func (srv *ChatServer) handleData(cmd string, ch ClientConn) {
 	}
 	log.Printf("msg:%v", msg)
 	switch msg.Type {
-	case 1:
+	case common.CreateGroup:
 		srv.curGroupID += 1
 		group := NewChatGroup(fmt.Sprintf("g-%v", srv.curGroupID), srv.curGroupID)
 		group.AddOneClient(ch)
@@ -120,7 +128,18 @@ func (srv *ChatServer) handleData(cmd string, ch ClientConn) {
 		if err != nil {
 			log.Printf("fail to create group:%v,%v", n, err)
 		}
-	case 2:
+	case common.AddGroupMember:
+		srv.Lock()
+		defer srv.Unlock()
+		if group, ok := srv.GroupMap[msg.GroupID]; ok {
+			group.AddOneClient(ch)
+			n, err := ch.Conn.Write([]byte(fmt.Sprintf("add to group %v ok",
+				msg.GroupID)))
+			if err != nil {
+				log.Printf("fail to create group:%v,%v", n, err)
+			}
+		}
+	case common.ShowGroup:
 		groups := make([]string, 0)
 		for _, group := range srv.GroupMap {
 			groups = append(groups, group.GroupName)
@@ -130,7 +149,7 @@ func (srv *ChatServer) handleData(cmd string, ch ClientConn) {
 		if err != nil {
 			log.Printf("fail to show group:%v,%v", n, err)
 		}
-	case 3:
+	case common.SHowGroupMembers:
 		groupID := msg.GroupID
 		members := make([]string, 0)
 		if group, ok := srv.GroupMap[groupID]; ok {
@@ -144,26 +163,30 @@ func (srv *ChatServer) handleData(cmd string, ch ClientConn) {
 		if err != nil {
 			log.Printf("fail to get group members:%v,%v,%v", groupID, err, members)
 		}
-	case 4:
-		groupID := msg.GroupID
-		if group, ok := srv.GroupMap[groupID]; ok {
-			if _, cok := group.ClientMap[ch.ClientID]; cok {
-				delete(group.ClientMap, ch.ClientID)
-			}
-		}
-		n, err := ch.Conn.Write([]byte(fmt.Sprintf("you have leave group:%v", groupID)))
+	case common.LeaveGroup:
+		srv.Lock()
+		defer srv.Unlock()
+		srv.LeaveGroup(msg.GroupID, ch)
+		n, err := ch.Conn.Write([]byte(fmt.Sprintf("you have leave group:%v",
+			msg.GroupID)))
 		if err != nil {
 			log.Printf("fail to leave group:%v,%v", n, err)
 		}
-	case 5:
+	case common.GroupMessage:
 		groupID, content := msg.GroupID, msg.Content
 		if group, ok := srv.GroupMap[groupID]; ok {
 			group.Broadcast(ch, content)
 		}
-	default:
+	case common.Normal:
 		n, err := ch.Conn.Write([]byte(msg.Content))
 		if err != nil {
 			log.Printf("fail to send data:%v,%v", n, err)
 		}
+	}
+}
+
+func (srv *ChatServer) LeaveGroup(groupID int, ch ClientConn) {
+	if group, ok := srv.GroupMap[groupID]; ok {
+		group.RemoveOneClient(ch)
 	}
 }

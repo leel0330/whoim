@@ -1,6 +1,9 @@
 package server
 
-import "sync"
+import (
+	"log"
+	"sync"
+)
 
 type ChatGroup struct {
 	GroupID   int
@@ -21,19 +24,26 @@ func NewChatGroup(name string, groupID int) *ChatGroup {
 func (group *ChatGroup) AddOneClient(clientConn ClientConn) {
 	group.Lock()
 	defer group.Unlock()
+	log.Printf("client id:%v", clientConn.ClientID)
 	group.ClientMap[clientConn.ClientID] = clientConn
 }
 
 func (group *ChatGroup) RemoveOneClient(clientConn ClientConn) {
 	group.Lock()
 	defer group.Unlock()
-	delete(group.ClientMap, clientConn.ClientID)
+	if _, ok := group.ClientMap[clientConn.ClientID]; ok {
+		delete(group.ClientMap, clientConn.ClientID)
+	}
 }
 
 func (group *ChatGroup) Broadcast(clientConn ClientConn, msg string) {
 	for _, v := range group.ClientMap {
 		if v.ClientID != clientConn.ClientID {
-			v.Conn.Write([]byte(msg))
+			n, err := v.Conn.Write([]byte(msg))
+			if err != nil {
+				log.Printf("fail to broadcast in group:%v,%v, %v",
+					group.GroupID, n, err)
+			}
 		}
 	}
 }

@@ -22,10 +22,11 @@ func PrintInnerCommands() {
 	cmdStr := `
 		:q               Quit
 		:cg              Create Group
+		:ag	 {gid}		 Add Group
 		:sg              Show Groups
-		:sgm {gid}        Show Group Members
+		:sgm {gid}       Show Group Members
 		:lg {gid}        Leave Group
-		:ggm {gid} {msg}Send Group Message
+		:ggm {gid} {msg} Send Group Message
 		:su              Show Online Users
 	`
 	log.Printf(cmdStr)
@@ -37,24 +38,28 @@ func genChatMessage(cmdStr string) common.ChatMessage {
 	msg := common.ChatMessage{}
 	switch tokens[0] {
 	case ":cg":
-		msg.Type = 1
+		msg.Type = common.CreateGroup
+	case ":ag":
+		msg.Type = common.AddGroupMember
+		groupID, _ := strconv.Atoi(tokens[1])
+		msg.GroupID = groupID
 	case ":sg":
-		msg.Type = 2
+		msg.Type = common.ShowGroup
 	case ":sgm":
-		msg.Type = 3
+		msg.Type = common.SHowGroupMembers
 		groupID, _ := strconv.Atoi(tokens[1])
 		msg.GroupID = groupID
 	case ":lg":
-		msg.Type = 4
+		msg.Type = common.LeaveGroup
 		groupID, _ := strconv.Atoi(tokens[1])
 		msg.GroupID = groupID
 	case ":ggm":
-		msg.Type = 5
+		msg.Type = common.GroupMessage
 		groupID, _ := strconv.Atoi(tokens[1])
 		msg.GroupID = groupID
 		msg.Content = tokens[2]
 	default:
-		msg.Type = 0
+		msg.Type = common.Normal
 		msg.Content = cmdStr
 	}
 	return msg
