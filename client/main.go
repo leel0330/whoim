@@ -27,7 +27,7 @@ func PrintInnerCommands() {
 		:sgm {gid}       Show Group Members
 		:lg {gid}        Leave Group
 		:ggm {gid} {msg} Send Group Message
-		:su              Show Online Users
+		:sou             Show Online Users
 	`
 	log.Printf(cmdStr)
 }
@@ -58,6 +58,8 @@ func genChatMessage(cmdStr string) common.ChatMessage {
 		groupID, _ := strconv.Atoi(tokens[1])
 		msg.GroupID = groupID
 		msg.Content = tokens[2]
+	case ":sou":
+		msg.Type = common.ShowOnlineUsers
 	default:
 		msg.Type = common.Normal
 		msg.Content = cmdStr
@@ -78,7 +80,10 @@ func HandleSend(conn *net.TCPConn) {
 		inputStr = inputStr[:len(inputStr)-1]
 		if inputStr == ":q" {
 			log.Printf("Byebye...")
-			conn.Close()
+			err := conn.CloseWrite()
+			if err != nil {
+				log.Printf("fail to close connection:%v", err)
+			}
 			break
 		}
 		msg := genChatMessage(inputStr)
@@ -92,7 +97,10 @@ func HandleSend(conn *net.TCPConn) {
 		n, err := conn.Write([]byte(inputStr))
 		if err != nil {
 			log.Printf("fail to send msg:%v,%v", n, err)
-			conn.CloseWrite()
+			err := conn.CloseWrite()
+			if err != nil {
+				log.Printf("fail to close connection:%v", err)
+			}
 			break
 		}
 	}
@@ -111,7 +119,7 @@ func main() {
 		return
 	}
 
-	log.Printf("client conn to service:%v", conn.RemoteAddr().String())
+	log.Printf("connect to server:%v", conn.RemoteAddr().String())
 
 	go HandleSend(conn)
 
@@ -119,10 +127,13 @@ func main() {
 	for {
 		size, err := conn.Read(buf)
 		if err != nil {
-			conn.Close()
+			err := conn.Close()
+			if err != nil {
+				log.Printf("fail to close connection:%v", err)
+			}
 			break
 		}
-		log.Printf("receive data from service:%v", string(buf[:size]))
+		log.Printf("receive data from server:\n%v", string(buf[:size]))
 	}
 
 }

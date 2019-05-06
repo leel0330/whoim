@@ -20,7 +20,8 @@ type ChatServer struct {
 	GateAddr    string
 	SrvListener net.Listener
 
-	GroupMap map[int]*ChatGroup
+	GroupMap  map[int]*ChatGroup
+	ClientMap map[int]ClientConn
 
 	curClientID int
 	curGroupID  int
@@ -34,7 +35,8 @@ func NewChatServer(port int) (*ChatServer, error) {
 		curClientID: 0,
 		curGroupID:  0,
 
-		GroupMap: make(map[int]*ChatGroup),
+		ClientMap: make(map[int]ClientConn),
+		GroupMap:  make(map[int]*ChatGroup),
 	}
 	err := srv.Start()
 	if err != nil {
@@ -80,6 +82,7 @@ func (srv *ChatServer) Run() {
 			ClientAddr: conn.RemoteAddr().String(),
 			Conn:       conn,
 		}
+		srv.ClientMap[clientConn.ClientID] = clientConn
 		go srv.HandleClientConn(clientConn)
 	}
 }
@@ -91,17 +94,27 @@ func (srv *ChatServer) HandleClientConn(ch ClientConn) {
 	for {
 		size, err := ch.Conn.Read(buf)
 		if size == 0 {
+			//断开连接
 			log.Printf("client conn:{%v:%v} closed", ch.ClientID, ch.ClientAddr)
 			//如果在一些群组里，需要从群组里删除该对象
 			for _, group := range srv.GroupMap {
 				srv.LeaveGroup(group.GroupID, ch)
 			}
-			ch.Conn.Close()
+			if _, ok := srv.ClientMap[ch.ClientID]; ok {
+				delete(srv.ClientMap, ch.ClientID)
+			}
+			err := ch.Conn.Close()
+			if err != nil {
+				log.Printf("fail to close connection:%v", err)
+			}
 			break
 		}
 		if err != nil {
 			log.Printf("fail to receive data:%v,%v", ch.ClientID, err)
-			ch.Conn.Close()
+			err := ch.Conn.Close()
+			if err != nil {
+				log.Printf("fail to close connection:%v", err)
+			}
 			break
 		}
 
@@ -117,7 +130,6 @@ func (srv *ChatServer) handleData(cmd string, ch ClientConn) {
 		log.Printf("fail to unmarshal:%v", cmd)
 		return
 	}
-	log.Printf("msg:%v", msg)
 	switch msg.Type {
 	case common.CreateGroup:
 		srv.curGroupID += 1
@@ -158,7 +170,6 @@ func (srv *ChatServer) handleData(cmd string, ch ClientConn) {
 			}
 		}
 		content := strings.Join(members, "\n")
-		log.Printf("sgm content:%v", content)
 		_, err := ch.Conn.Write([]byte(content))
 		if err != nil {
 			log.Printf("fail to get group members:%v,%v,%v", groupID, err, members)
@@ -174,8 +185,19 @@ func (srv *ChatServer) handleData(cmd string, ch ClientConn) {
 		}
 	case common.GroupMessage:
 		groupID, content := msg.GroupID, msg.Content
+		content = fmt.Sprintf("[%v,%v]:{%v}", ch.ClientID, ch.ClientAddr, content)
 		if group, ok := srv.GroupMap[groupID]; ok {
 			group.Broadcast(ch, content)
+		}
+	case common.ShowOnlineUsers:
+		members := make([]string, 0)
+		for _, v := range srv.ClientMap {
+			members = append(members, fmt.Sprintf("%v[%v]", v.ClientID, v.ClientAddr))
+		}
+		content := strings.Join(members, "\n")
+		_, err := ch.Conn.Write([]byte(content))
+		if err != nil {
+			log.Printf("fail to show online users:%v,%v", err, members)
 		}
 	case common.Normal:
 		n, err := ch.Conn.Write([]byte(msg.Content))
