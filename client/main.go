@@ -1,10 +1,16 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"strconv"
+	"strings"
+	"whoim/common"
 )
 
 var (
@@ -14,33 +20,76 @@ var (
 
 func PrintInnerCommands() {
 	cmdStr := `
-		:q Quit
-		:cg Create Group
-		:sg Show Groups
-		:su Show Online Users
+		:q               Quit
+		:cg              Create Group
+		:sg              Show Groups
+		:sgm {gid}        Show Group Members
+		:lg {gid}        Leave Group
+		:ggm {gid} {msg}Send Group Message
+		:su              Show Online Users
 	`
 	log.Printf(cmdStr)
 }
 
+func genChatMessage(cmdStr string) common.ChatMessage {
+	tokens := strings.Split(cmdStr, " ")
+	log.Printf("tokens:%v", tokens)
+	msg := common.ChatMessage{}
+	switch tokens[0] {
+	case ":cg":
+		msg.Type = 1
+	case ":sg":
+		msg.Type = 2
+	case ":sgm":
+		msg.Type = 3
+		groupID, _ := strconv.Atoi(tokens[1])
+		msg.GroupID = groupID
+	case ":lg":
+		msg.Type = 4
+		groupID, _ := strconv.Atoi(tokens[1])
+		msg.GroupID = groupID
+	case ":ggm":
+		msg.Type = 5
+		groupID, _ := strconv.Atoi(tokens[1])
+		msg.GroupID = groupID
+		msg.Content = tokens[2]
+	default:
+		msg.Type = 0
+		msg.Content = cmdStr
+	}
+	return msg
+}
+
 func HandleSend(conn *net.TCPConn) {
-	var input string
-	username := conn.LocalAddr().String()
+	var input *bufio.Reader
 	for {
 		PrintInnerCommands()
-		fmt.Scanln(&input)
-		if input == ":q" {
+		input = bufio.NewReader(os.Stdin)
+		inputStr, err := input.ReadString('\n')
+		if err != nil {
+			log.Printf("fail to read stdin input:%v", err)
+			continue
+		}
+		inputStr = inputStr[:len(inputStr)-1]
+		if inputStr == ":q" {
 			log.Printf("Byebye...")
 			conn.Close()
 			break
 		}
-		words := fmt.Sprintf("[%v] say {%v}", username, input)
-		size, err := conn.Write([]byte(words))
+		msg := genChatMessage(inputStr)
+		bytes, err := json.Marshal(msg)
 		if err != nil {
-			log.Printf("fail to send msg:%v", err)
+			log.Printf("fail to json marshal:%v", err)
+			continue
+		}
+		inputStr = string(bytes)
+		log.Printf("input str:%v", inputStr)
+		n, err := conn.Write([]byte(inputStr))
+		if err != nil {
+			log.Printf("fail to send msg:%v,%v", n, err)
 			conn.CloseWrite()
 			break
 		}
-		log.Printf("send msg sz:%v,%v", size, words)
 	}
 }
 
