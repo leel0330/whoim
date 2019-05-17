@@ -178,7 +178,7 @@ func main() {
 
 	log.Printf("connect to server:%v", conn.RemoteAddr().String())
 
-	go SendMessage(conn)
+	go AutoSendMessage(conn)
 
 	buf := make([]byte, 1024)
 	for {

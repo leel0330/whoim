@@ -61,7 +61,7 @@ func (srv *ChatServer) startListen() error {
 	}
 	listener, err := net.ListenTCP("tcp", addr)
 	if err != nil {
-		log.Panicf("fail to init listener")
+		log.Panicf("fail to init listener:%v", err)
 		return err
 	}
 	log.Printf("chat service start on addr:%v", addr)
