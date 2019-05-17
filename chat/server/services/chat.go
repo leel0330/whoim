@@ -1,4 +1,4 @@
-package server
+package services
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"whoim/common"
+	"whoim/chat/common"
 )
 
 type ClientConn struct {
@@ -87,26 +87,30 @@ func (srv *ChatServer) Run() {
 	}
 }
 
+func (srv *ChatServer) HandleCloseClientConn(ch ClientConn) {
+	//断开连接
+	log.Printf("client conn:{%v:%v} closed", ch.ClientID, ch.ClientAddr)
+	//如果在一些群组里，需要从群组里删除该对象
+	for _, group := range srv.GroupMap {
+		srv.LeaveGroup(group.GroupID, ch)
+	}
+	if _, ok := srv.ClientMap[ch.ClientID]; ok {
+		delete(srv.ClientMap, ch.ClientID)
+	}
+	err := ch.Conn.Close()
+	if err != nil {
+		log.Printf("fail to close connection:%v", err)
+	}
+}
+
 func (srv *ChatServer) HandleClientConn(ch ClientConn) {
 	log.Printf("new client conn:%v", ch.Conn.RemoteAddr().String())
-
+	receiverStr := ""
 	buf := make([]byte, 1024)
 	for {
 		size, err := ch.Conn.Read(buf)
 		if size == 0 {
-			//断开连接
-			log.Printf("client conn:{%v:%v} closed", ch.ClientID, ch.ClientAddr)
-			//如果在一些群组里，需要从群组里删除该对象
-			for _, group := range srv.GroupMap {
-				srv.LeaveGroup(group.GroupID, ch)
-			}
-			if _, ok := srv.ClientMap[ch.ClientID]; ok {
-				delete(srv.ClientMap, ch.ClientID)
-			}
-			err := ch.Conn.Close()
-			if err != nil {
-				log.Printf("fail to close connection:%v", err)
-			}
+			srv.HandleCloseClientConn(ch)
 			break
 		}
 		if err != nil {
@@ -118,8 +122,15 @@ func (srv *ChatServer) HandleClientConn(ch ClientConn) {
 			break
 		}
 
-		receiveStr := string(buf[:size])
-		srv.handleData(receiveStr, ch)
+		receiverStr = strings.Join([]string{receiverStr, string(buf[:size])}, "")
+		if strings.Contains(receiverStr, common.SepStr) {
+			idx := strings.Index(receiverStr, common.SepStr)
+			sendData := receiverStr[:idx]
+			receiverStr = receiverStr[idx+len(common.SepStr):]
+			// log.Printf("sendata:%v,%v", sendData, receiverStr)
+			srv.handleData(sendData, ch)
+		}
+
 	}
 }
 
@@ -198,6 +209,13 @@ func (srv *ChatServer) handleData(cmd string, ch ClientConn) {
 		_, err := ch.Conn.Write([]byte(content))
 		if err != nil {
 			log.Printf("fail to show online users:%v,%v", err, members)
+		}
+	case common.ChatTo:
+		if recvConn, ok := srv.ClientMap[msg.UserId]; ok {
+			n, err := recvConn.Conn.Write([]byte(msg.Content))
+			if err != nil {
+				log.Printf("fail to send data:%v,%v", n, err)
+			}
 		}
 	case common.Normal:
 		n, err := ch.Conn.Write([]byte(msg.Content))

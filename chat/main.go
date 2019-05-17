@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"log"
-	"whoim/chat/server"
+	"whoim/chat/server/services"
 )
 
 var (
@@ -12,7 +12,7 @@ var (
 
 func main() {
 
-	chatServer, err := server.NewChatServer(*port)
+	chatServer, err := services.NewChatServer(*port)
 	if err != nil {
 		log.Printf("fail to start chat service:%v", err)
 		return

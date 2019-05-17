@@ -6,11 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
 	"strings"
-	"whoim/common"
+	"time"
+	"whoim/chat/common"
 )
 
 var (
@@ -28,6 +30,7 @@ func PrintInnerCommands() {
 		:lg {gid}        Leave Group
 		:ggm {gid} {msg} Send Group Message
 		:sou             Show Online Users
+		:ct {uid} {msg}  Chat to user{uid}
 	`
 	log.Printf(cmdStr)
 }
@@ -60,6 +63,11 @@ func genChatMessage(cmdStr string) common.ChatMessage {
 		msg.Content = tokens[2]
 	case ":sou":
 		msg.Type = common.ShowOnlineUsers
+	case ":ct":
+		msg.Type = common.ChatTo
+		uid, _ := strconv.Atoi(tokens[1])
+		msg.UserId = uid
+		msg.Content = strings.Join(tokens[2:], " ")
 	default:
 		msg.Type = common.Normal
 		msg.Content = cmdStr
@@ -67,7 +75,7 @@ func genChatMessage(cmdStr string) common.ChatMessage {
 	return msg
 }
 
-func HandleSend(conn *net.TCPConn) {
+func SendMessage(conn *net.TCPConn) {
 	var input *bufio.Reader
 	for {
 		PrintInnerCommands()
@@ -93,6 +101,7 @@ func HandleSend(conn *net.TCPConn) {
 			continue
 		}
 		inputStr = string(bytes)
+		inputStr = strings.Join([]string{inputStr, common.SepStr}, "")
 		log.Printf("input str:%v", inputStr)
 		n, err := conn.Write([]byte(inputStr))
 		if err != nil {
@@ -102,6 +111,54 @@ func HandleSend(conn *net.TCPConn) {
 				log.Printf("fail to close connection:%v", err)
 			}
 			break
+		}
+	}
+}
+
+func genFakeContent() string {
+	chars := "abcdefghigklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+	charsLen := len(chars)
+	s, e := rand.Intn(charsLen), rand.Intn(charsLen)
+	if s > e {
+		s, e = e, s
+	}
+	return chars[s : e+1]
+
+}
+
+func AutoSendMessage(conn *net.TCPConn) {
+	for {
+		ticker := time.NewTicker(time.Second * 1)
+
+		select {
+		case _, ok := <-ticker.C:
+			if ok {
+				content := genFakeContent()
+				msg := common.ChatMessage{
+					Type:    common.Normal,
+					Content: content,
+				}
+				bytes, err := json.Marshal(msg)
+				if err != nil {
+					log.Printf("fail to json marshal:%v", err)
+					continue
+				}
+				inputStr := string(bytes)
+				inputStr = strings.Join([]string{inputStr, common.SepStr}, "")
+				log.Printf("input str:%v", inputStr)
+				n, err := conn.Write([]byte(inputStr))
+				if err != nil {
+					log.Printf("fail to send msg:%v,%v", n, err)
+					err := conn.CloseWrite()
+					if err != nil {
+						log.Printf("fail to close connection:%v", err)
+					}
+					break
+				}
+
+			}
+
+
 		}
 	}
 }
@@ -121,7 +178,7 @@ func main() {
 
 	log.Printf("connect to server:%v", conn.RemoteAddr().String())
 
-	go HandleSend(conn)
+	go SendMessage(conn)
 
 	buf := make([]byte, 1024)
 	for {
